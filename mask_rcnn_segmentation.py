@@ -11,20 +11,21 @@ import cv2
 import os
 
 # построить анализ аргумента и проанализировать аргументы
-ap = argparse.ArgumentParser()
-ap.add_argument("-i", "--input", type=str, default="", help="путь к (необязательно) входному видеофайлу")
-ap.add_argument("-o", "--output", type=str, default="", help="путь к (необязательно) выходному видеофайлу")
-ap.add_argument("-d", "--display", type=int, default=1, help="должен ли отображаться кадр вывода")
-ap.add_argument("-m", "--mask-rcnn", required=True, help="базовый путь к каталогу mask-rcnn")
-ap.add_argument("-c", "--confidence", type=float, default=0.5,
-                help="минимальная вероятность отфильтровать слабые обнаружения")
-ap.add_argument("-t", "--threshold", type=float, default=0.3, help="минимальный порог для пиксельной сегментации маски")
-ap.add_argument("-u", "--use-gpu", type=bool, default=0,
-                help="логическое значение, указывающее, следует ли использовать CUDA GPU")
-args = vars(ap.parse_args())
+# ap = argparse.ArgumentParser()
+# ap.add_argument("-i", "--input", type=str, default="", help="путь к (необязательно) входному видеофайлу")
+# ap.add_argument("-o", "--output", type=str, default="", help="путь к (необязательно) выходному видеофайлу")
+# ap.add_argument("-d", "--display", type=int, default=1, help="должен ли отображаться кадр вывода")
+# ap.add_argument("-m", "--mask-rcnn", required=True, help="базовый путь к каталогу mask-rcnn")
+# ap.add_argument("-c", "--confidence", type=float, default=0.5,
+#                 help="минимальная вероятность отфильтровать слабые обнаружения")
+# ap.add_argument("-t", "--threshold", type=float, default=0.3, help="минимальный порог для пиксельной сегментации маски")
+# ap.add_argument("-u", "--use-gpu", type=bool, default=0,
+#                 help="логическое значение, указывающее, следует ли использовать CUDA GPU")
+# args = vars(ap.parse_args())
 
+mask_rcnn = "mask-rcnn-coco"
 # загружаем метки классов COCO, на которых была обучена наша маска R-CNN
-labelsPath = os.path.sep.join([args["mask_rcnn"], "object_detection_classes_coco.txt"])
+labelsPath = os.path.sep.join([mask_rcnn, "object_detection_classes_coco.txt"])
 LABELS = open(labelsPath).read().strip().split("\n")
 
 # инициализировать список цветов для представления каждой возможной метки класса
@@ -32,15 +33,16 @@ np.random.seed(42)
 COLORS = np.random.randint(0, 255, size=(len(LABELS), 3), dtype="uint8")
 
 # получить пути к весам Mask R-CNN и конфигурации модели
-weightsPath = os.path.sep.join([args["mask_rcnn"], "frozen_inference_graph.pb"])
-configPath = os.path.sep.join([args["mask_rcnn"], "mask_rcnn_inception_v2_coco_2018_01_28.pbtxt"])
+weightsPath = os.path.sep.join([mask_rcnn, "frozen_inference_graph.pb"])
+configPath = os.path.sep.join([mask_rcnn, "mask_rcnn_inception_v2_coco_2018_01_28.pbtxt"])
 
 # загрузите нашу маску R-CNN, обученную на наборе данных COCO (90 классов) с диска
 print("[INFO] loading Mask R-CNN from disk...")
 net = cv2.dnn.readNetFromTensorflow(weightsPath, configPath)
 
 # проверь, собираемся ли мы использовать GPU
-if args["use_gpu"]:
+use_gpu = 0
+if use_gpu:
     # set CUDA as the preferable backend and target
     print("[INFO] setting preferable backend and target to CUDA...")
     net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
@@ -48,7 +50,8 @@ if args["use_gpu"]:
 
 # инициализировать видеопоток и указатель для вывода видеофайла, затем запустить таймер FPS
 print("[INFO] accessing video stream...")
-vs = cv2.VideoCapture(args["input"] if args["input"] else 0)
+input_data = ""
+vs = cv2.VideoCapture(input_data if input_data else 0)
 writer = None
 fps = FPS().start()
 
@@ -73,8 +76,9 @@ while True:
         classID = int(boxes[0, 0, i, 1])
         confidence = boxes[0, 0, i, 2]
 
+        confidence_minimum_value = 0.5
         # отфильтровать слабые прогнозы, гарантируя, что обнаруженная вероятность больше минимальной вероятности
-        if confidence > args["confidence"]:
+        if confidence > confidence_minimum_value:
             # масштабируйте координаты ограничивающего прямоугольника обратно относительно размера кадра, а затем
             # вычислите ширину и высоту ограничивающего прямоугольника
             (H, W) = frame.shape[:2]
@@ -87,7 +91,8 @@ while True:
             # размерам ограничивающей рамки, а затем, наконец, порог для создания * двоичной * маски
             mask = masks[i, classID]
             mask = cv2.resize(mask, (boxW, boxH), interpolation=cv2.INTER_CUBIC)
-            mask = (mask > args["threshold"])
+            threshold = 0.3
+            mask = (mask > threshold)
 
             # извлекать ROI изображения, но * только * извлекать замаскированную область ROI
             roi = frame[startY:endY, startX:endX][mask]
@@ -109,7 +114,8 @@ while True:
             cv2.putText(frame, text, (startX, startY - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
     # проверьте, должен ли выходной кадр отображаться на вашем экране
-    if args["display"] > 0:
+    display = 1
+    if display > 0:
         # показать выходной кадр
         cv2.imshow("Frame", frame)
         key = cv2.waitKey(1) & 0xFF
@@ -119,10 +125,11 @@ while True:
             break
 
     # если был указан путь к выходному видеофайлу, а средство записи видео не было инициализировано, сделайте это сейчас
-    if args["output"] != "" and writer is None:
+    output = ""
+    if output != "" and writer is None:
         # инициализировать наш видео писатель
         fourcc = cv2.VideoWriter_fourcc(*"MJPG")
-        writer = cv2.VideoWriter(args["output"], fourcc, 30, (frame.shape[1], frame.shape[0]), True)
+        writer = cv2.VideoWriter(output, fourcc, 30, (frame.shape[1], frame.shape[0]), True)
 
     # если видеомагнитофон None, записать кадр в выходной видеофайл
     if writer is not None:
